@@ -1341,8 +1341,20 @@ async def cup_edit(interaction: discord.Interaction, request: str):
     env = os.environ.copy()
     env["PATH"] = os.path.expanduser("~/.opencode/bin") + ":" + env.get("PATH", "")
 
-    try:
-        result = subprocess.run(
+        # Auto git: pull before, push after
+        git_env = os.environ.copy()
+        git_env["GIT_SSH_COMMAND"] = "ssh -i ~/.ssh/botaovava_deploy -F /dev/null -o StrictHostKeyChecking=no -o IdentitiesOnly=yes"
+        git_env["GIT_AUTHOR_NAME"] = "botaovava"
+        git_env["GIT_AUTHOR_EMAIL"] = "botaovava@cup.local"
+
+        try:
+            subprocess.run(["git", "pull", "origin", "main"], capture_output=True,
+                           cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
+        except Exception:
+            pass
+
+        try:
+            result = subprocess.run(
             ["opencode", "run", request],
             capture_output=True,
             text=True,
@@ -1366,6 +1378,17 @@ async def cup_edit(interaction: discord.Interaction, request: str):
             for mod_name in list(sys.modules.keys()):
                 if mod_name.startswith("scripts."):
                     _reload(sys.modules[mod_name])
+        except Exception:
+            pass
+
+        # Auto-commit and push
+        try:
+            subprocess.run(["git", "add", "-A"], capture_output=True,
+                           cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
+            subprocess.run(["git", "commit", "-m", f"cup_edit: {request[:80]}"],
+                           capture_output=True, cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
+            subprocess.run(["git", "push", "origin", "main"], capture_output=True,
+                           cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
         except Exception:
             pass
 
