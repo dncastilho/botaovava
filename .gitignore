@@ -1,0 +1,9 @@
+bot/.env
+__pycache__/
+*.pyc
+portal/node_modules/
+portal/build/
+portal/.svelte-kit/
+data/*.json
+assets/logo.svg
+portal/static/logo.svg

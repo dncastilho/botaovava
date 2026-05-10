@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vava Bot4Bots Cup — Player Registration</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0f1923;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+  }
+  .container {
+    background: #1a1a2e;
+    border: 2px solid #ff4655;
+    border-radius: 12px;
+    padding: 40px;
+    max-width: 560px;
+    width: 100%;
+    box-shadow: 0 0 40px rgba(255,70,85,0.15);
+  }
+  .logo { text-align: center; margin-bottom: 24px; }
+  .logo img { max-width: 300px; height: auto; }
+  h1 { color: #ff4655; font-size: 28px; text-align: center; margin-bottom: 8px; }
+  .subtitle { text-align: center; color: #888; font-size: 14px; margin-bottom: 32px; }
+  .form-group { margin-bottom: 20px; }
+  label { display: block; margin-bottom: 6px; color: #ccc; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+  input, select {
+    width: 100%;
+    padding: 12px 14px;
+    background: #0f1923;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 15px;
+    transition: border-color 0.2s;
+  }
+  input:focus, select:focus { outline: none; border-color: #ff4655; }
+  select option { background: #1a1a2e; color: #fff; }
+  .checkbox-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .checkbox-group label {
+    display: flex; align-items: center; gap: 6px;
+    background: #0f1923; border: 1px solid #333; border-radius: 6px;
+    padding: 8px 14px; cursor: pointer; text-transform: none; letter-spacing: 0;
+    font-size: 14px;
+  }
+  .checkbox-group label:hover { border-color: #ff4655; }
+  .checkbox-group input[type="checkbox"] { width: auto; accent-color: #ff4655; }
+  button {
+    width: 100%; padding: 14px;
+    background: linear-gradient(135deg, #ff4655, #ff6b7a);
+    border: none; border-radius: 6px; color: #fff;
+    font-size: 16px; font-weight: 700; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 2px;
+    transition: transform 0.1s, box-shadow 0.2s;
+    margin-top: 8px;
+  }
+  button:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(255,70,85,0.3); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .success { background: #1b3a1b; border: 1px solid #2d6a2d; color: #4ade80; padding: 14px; border-radius: 6px; text-align: center; margin-top: 16px; display: none; }
+  .error { background: #3a1b1b; border: 1px solid #6a2d2d; color: #f87171; padding: 14px; border-radius: 6px; text-align: center; margin-top: 16px; display: none; }
+  .note { font-size: 11px; color: #666; text-align: center; margin-top: 24px; }
+  .note a { color: #ff4655; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="logo">
+    <img src="../assets/logo.svg" alt="Vava Bot4Bots Cup" onerror="this.style.display='none'">
+  </div>
+  <h1>VAVA BOT4BOTS CUP</h1>
+  <p class="subtitle">Player Registration Form</p>
+
+  <form id="regForm">
+    <div class="form-group">
+      <label>Discord Username *</label>
+      <input type="text" id="discord_username" placeholder="username" required>
+    </div>
+
+    <div class="form-group">
+      <label>Discord ID (User ID) *</label>
+      <input type="text" id="discord_id" placeholder="123456789012345678" required>
+      <p style="font-size:11px;color:#666;margin-top:4px;">Enable Developer Mode in Discord → Right-click your name → Copy ID</p>
+    </div>
+
+    <div class="form-group">
+      <label>Riot ID *</label>
+      <input type="text" id="riot_id" placeholder="PlayerName#TAG" required>
+    </div>
+
+    <div class="form-group">
+      <label>Rank *</label>
+      <select id="rank" required>
+        <option value="">Select your rank</option>
+        <optgroup label="Iron"><option value="Iron 1">Iron 1</option><option value="Iron 2">Iron 2</option><option value="Iron 3">Iron 3</option></optgroup>
+        <optgroup label="Bronze"><option value="Bronze 1">Bronze 1</option><option value="Bronze 2">Bronze 2</option><option value="Bronze 3">Bronze 3</option></optgroup>
+        <optgroup label="Silver"><option value="Silver 1">Silver 1</option><option value="Silver 2">Silver 2</option><option value="Silver 3">Silver 3</option></optgroup>
+        <optgroup label="Gold"><option value="Gold 1">Gold 1</option><option value="Gold 2">Gold 2</option><option value="Gold 3">Gold 3</option></optgroup>
+        <optgroup label="Platinum"><option value="Platinum 1">Platinum 1</option><option value="Platinum 2">Platinum 2</option><option value="Platinum 3">Platinum 3</option></optgroup>
+        <optgroup label="Diamond"><option value="Diamond 1">Diamond 1</option><option value="Diamond 2">Diamond 2</option><option value="Diamond 3">Diamond 3</option></optgroup>
+        <optgroup label="Ascendant"><option value="Ascendant 1">Ascendant 1</option><option value="Ascendant 2">Ascendant 2</option><option value="Ascendant 3">Ascendant 3</option></optgroup>
+        <optgroup label="Immortal"><option value="Immortal 1">Immortal 1</option><option value="Immortal 2">Immortal 2</option><option value="Immortal 3">Immortal 3</option></optgroup>
+        <optgroup label="Radiant"><option value="Radiant">Radiant</option></optgroup>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Preferred Roles (select up to 2)</label>
+      <div class="checkbox-group">
+        <label><input type="checkbox" name="role" value="Duelist"> Duelist</label>
+        <label><input type="checkbox" name="role" value="Initiator"> Initiator</label>
+        <label><input type="checkbox" name="role" value="Controller"> Controller</label>
+        <label><input type="checkbox" name="role" value="Sentinel"> Sentinel</label>
+        <label><input type="checkbox" name="role" value="Flex"> Flex (any)</label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Region *</label>
+      <select id="region" required>
+        <option value="">Select your region</option>
+        <option value="EU">Europe</option>
+        <option value="NA">North America</option>
+        <option value="BR">Brazil</option>
+        <option value="LATAM">Latin America</option>
+        <option value="APAC">Asia-Pacific</option>
+        <option value="KR">Korea</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>General Availability (select all that apply)</label>
+      <div class="checkbox-group">
+        <label><input type="checkbox" name="availability" value="weekday_evening"> Weekday Evenings</label>
+        <label><input type="checkbox" name="availability" value="saturday"> Saturday</label>
+        <label><input type="checkbox" name="availability" value="sunday"> Sunday</label>
+        <label><input type="checkbox" name="availability" value="flexible"> Flexible</label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Any notes? (optional)</label>
+      <input type="text" id="notes" placeholder="Anything we should know...">
+    </div>
+
+    <button type="submit" id="submitBtn">Register for Vava Bot4Bots Cup</button>
+
+    <div class="success" id="successMsg">Registration submitted! You're in the pool. 🎯</div>
+    <div class="error" id="errorMsg"></div>
+  </form>
+
+  <p class="note">
+    By registering you agree to the <a href="../RULES.md" target="_blank">Vava Bot4Bots Cup Rules</a>.
+    Registration closes in 2 weeks.
+  </p>
+</div>
+
+<script>
+document.getElementById('regForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const roles = Array.from(document.querySelectorAll('input[name="role"]:checked')).map(cb => cb.value);
+  const availability = Array.from(document.querySelectorAll('input[name="availability"]:checked')).map(cb => cb.value);
+
+  const data = {
+    discord_username: document.getElementById('discord_username').value.trim(),
+    discord_id: document.getElementById('discord_id').value.trim(),
+    riot_id: document.getElementById('riot_id').value.trim(),
+    rank: document.getElementById('rank').value,
+    roles: roles,
+    region: document.getElementById('region').value,
+    availability: availability,
+    notes: document.getElementById('notes').value.trim(),
+    registered_at: new Date().toISOString()
+  };
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  document.getElementById('successMsg').style.display = 'none';
+  document.getElementById('errorMsg').style.display = 'none';
+
+  try {
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    if (res.ok) {
+      document.getElementById('successMsg').style.display = 'block';
+      document.getElementById('regForm').reset();
+    } else {
+      const err = await res.json();
+      document.getElementById('errorMsg').textContent = err.error || 'Submission failed.';
+      document.getElementById('errorMsg').style.display = 'block';
+    }
+  } catch (err) {
+    document.getElementById('errorMsg').textContent = 'Could not connect to server. Contact an admin.';
+    document.getElementById('errorMsg').style.display = 'block';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Register for Bot\'s Cup';
+});
+
+// Limit role checkboxes to 2
+document.querySelectorAll('input[name="role"]').forEach(cb => {
+  cb.addEventListener('change', () => {
+    const checked = document.querySelectorAll('input[name="role"]:checked');
+    if (checked.length > 2) cb.checked = false;
+  });
+});
+</script>
+</body>
+</html>
