@@ -9,6 +9,7 @@ Optional DeepSeek integration for intelligent hype/commentary.
 import asyncio
 import datetime
 import json
+import logging
 import os
 import random
 import re
@@ -17,6 +18,12 @@ import sys
 import traceback
 from pathlib import Path
 from typing import Optional
+
+# --- Logging ---
+LOG_FORMAT = "%(asctime)s [%(levelname)-7s] %(name)s: %(message)s"
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S",
+                    stream=sys.stdout, force=True)
+log = logging.getLogger("vavabot")
 
 import discord
 from discord import app_commands, ui
@@ -85,9 +92,9 @@ def init_deepseek():
                     BOT_OWNER_ID = line.split("=", 1)[1].strip('"').strip("'")
     DEEPSEEK_ENABLED = bool(DEEPSEEK_API_KEY)
     if DEEPSEEK_ENABLED:
-        print("[+] DeepSeek AI features enabled")
+        log.info("DeepSeek AI features enabled")
     if BOT_OWNER_ID:
-        print(f"[+] Bot owner set: {BOT_OWNER_ID}")
+        log.info("Bot owner set: %s", BOT_OWNER_ID)
 
 
 def owner_only():
@@ -127,7 +134,7 @@ async def deepseek_generate(prompt: str, max_tokens: int = 200) -> Optional[str]
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        print(f"[!] DeepSeek API error: {e}")
+        log.warning("DeepSeek API error: %s", e)
     return None
 
 
@@ -277,6 +284,9 @@ class RoleDropdown(ui.Select):
                 break
 
         if player:
+            log.info("REGISTRATION_COMPLETE: %s — %s — %s — [%s]",
+                     player['discord_display'], player['rank'], player['riot_id'],
+                     ', '.join(player.get('roles', [])))
             await interaction.response.send_message(
                 f"✅ **Registration complete!**\n"
                 f"Riot ID: {player['riot_id']}\n"
@@ -554,9 +564,18 @@ tree = app_commands.CommandTree(bot)
 async def on_ready():
     await tree.sync()
     cfg = load_config()
-    print(f"[+] Vava Bot4Bots Cup bot online as {bot.user}")
-    print(f"[+] Guilds: {len(bot.guilds)}  |  Phase: {cfg['phase']}  |  AI: {'ON' if DEEPSEEK_ENABLED else 'OFF'}")
+    log.info("Bot online as %s — %d guild(s), phase=%s, ai=%s",
+             bot.user, len(bot.guilds), cfg['phase'], 'ON' if DEEPSEEK_ENABLED else 'OFF')
     match_reminders.start()
+
+
+@tree.error
+async def on_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    log.error("COMMAND_ERROR: %s by %s — %s",
+              interaction.command.name if interaction.command else "?",
+              interaction.user.display_name, error)
+    if not interaction.response.is_done():
+        await interaction.response.send_message(f"Error: {error}", ephemeral=True)
 
 
 @tasks.loop(minutes=60)
@@ -801,6 +820,9 @@ async def cup_close_registration(interaction: discord.Interaction):
         return
 
     teams, subs = result
+    log.info("TEAMS_FORMED: %d teams, %d players, avg rank spread=%.1f",
+             len(teams), len(players),
+             max(t['average_rank'] for t in teams) - min(t['average_rank'] for t in teams))
     save_json(TEAMS_FILE, {
         "teams": teams,
         "substitutes": subs,
@@ -868,6 +890,8 @@ async def cup_start_bracket(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
     bracket = generate_bracket(teams, cfg.get("start_date"))
+    log.info("BRACKET_GENERATED: %d teams, %d matches, start=%s",
+             bracket['num_teams'], len(bracket['matches']), bracket['start_date'])
     save_json(MATCHES_FILE, bracket)
 
     cfg["phase"] = "bracket"
@@ -1136,6 +1160,9 @@ async def cup_report(interaction: discord.Interaction, match_id: int, our_score:
 
     resolve_winners(matches_data)
     save_json(MATCHES_FILE, matches_data)
+    log.info("MATCH_REPORTED: #%d %s %d-%d %s (%s) — winner: %s",
+             match_id, reporter_team_name, our_score, their_score, opponent_name,
+             match['round'], winner_name)
 
     # Announce result
     cfg = load_config()
@@ -1322,6 +1349,8 @@ async def cup_edit(interaction: discord.Interaction, request: str):
 
     await interaction.response.defer(ephemeral=False)
 
+    log.info("CUP_EDIT request from %s: %s", interaction.user.display_name, request[:200])
+
     classify = await deepseek_generate(
         f'You are a classifier. A Discord bot admin sent this message: "{request}"\n'
         f'Does this message ask the bot to modify its own source code or project files? '
@@ -1331,6 +1360,7 @@ async def cup_edit(interaction: discord.Interaction, request: str):
     )
 
     if not classify or "NO" in classify.upper():
+        log.info("CUP_EDIT rejected by classifier: %s", classify)
         await interaction.followup.send(
             f"Not a code-change request. Use other commands for tournament operations.\n\n"
             f"If this should be a code change, be specific about what file or behavior to modify.",
@@ -1367,6 +1397,8 @@ async def cup_edit(interaction: discord.Interaction, request: str):
         if len(output) > 1900:
             output = output[:1900] + "\n...(truncated)"
 
+        log.info("CUP_EDIT opencode completed (rc=%d, output=%d chars)", result.returncode, len(output))
+
         await interaction.followup.send(
             f"**opencode says:**\n```\n{output}\n```" if output else "opencode ran but produced no output.",
             ephemeral=False,
@@ -1385,18 +1417,24 @@ async def cup_edit(interaction: discord.Interaction, request: str):
         try:
             subprocess.run(["git", "add", "-A"], capture_output=True,
                            cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
-            subprocess.run(["git", "commit", "-m", f"cup_edit: {request[:80]}"],
-                           capture_output=True, cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
-            subprocess.run(["git", "push", "origin", "main"], capture_output=True,
+            commit_result = subprocess.run(
+                ["git", "commit", "-m", f"cup_edit: {request[:80]}"],
+                capture_output=True, cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
+            log.info("CUP_EDIT git commit: %s", commit_result.stdout.decode().strip() or commit_result.stderr.decode().strip())
+            push_result = subprocess.run(["git", "push", "origin", "main"], capture_output=True,
                            cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
+            log.info("CUP_EDIT git push: rc=%d", push_result.returncode)
         except Exception:
             pass
 
     except subprocess.TimeoutExpired:
+        log.error("CUP_EDIT opencode timed out (120s)")
         await interaction.followup.send("opencode timed out (120s). The task might be too large.", ephemeral=False)
     except FileNotFoundError:
+        log.error("CUP_EDIT opencode binary not found")
         await interaction.followup.send("opencode not found at ~/.opencode/bin/opencode.", ephemeral=False)
     except Exception as e:
+        log.error("CUP_EDIT opencode error: %s", e)
         await interaction.followup.send(f"Error running opencode: {e}", ephemeral=False)
 
 
@@ -1508,7 +1546,7 @@ async def start_web():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
-    print(f"[+] Portal at http://0.0.0.0:8080")
+    log.info("Portal serving at http://0.0.0.0:8080")
 
 
 @tree.command(name="cup_portal", description="Get the tournament portal URL")
@@ -1528,8 +1566,7 @@ if __name__ == "__main__":
 
     token = get_token()
     if not token:
-        print("[!] Set DISCORD_BOT_TOKEN in environment or bot/.env")
-        print("    Create a bot at: https://discord.com/developers/applications")
+        log.critical("DISCORD_BOT_TOKEN not set. Create a bot at https://discord.com/developers/applications")
         sys.exit(1)
 
     PORTAL_URL = os.environ.get("PORTAL_URL", "http://170.64.204.139:8080")
