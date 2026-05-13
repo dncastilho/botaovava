@@ -771,11 +771,11 @@ async def cup_players(interaction: discord.Interaction):
     max_count = max(rank_counts.values()) if rank_counts else 1
     rank_bars = []
     for rank in RANKS:
-        count = rank_counts.get(rank, 0)
-        if count > 0:
-            bar_len = max(1, int(count / max_count * 15))
+        n = rank_counts.get(rank, 0)
+        if n > 0:
+            bar_len = max(1, int(n / max_count * 15))
             bar = "█" * bar_len
-            rank_bars.append(f"`{rank:<14}` {bar} {count}")
+            rank_bars.append(f"`{rank:<14}` {bar} {n}")
 
     player_list = []
     for p in sorted(players, key=lambda x: x.get("discord_display", "").lower()):
