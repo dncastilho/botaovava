@@ -1374,7 +1374,6 @@ async def cup_edit(interaction: discord.Interaction, request: str):
     env["PATH"] = os.path.expanduser("~/.opencode/bin") + ":" + env.get("PATH", "")
 
     git_env = os.environ.copy()
-    git_env["GIT_SSH_COMMAND"] = "ssh -i ~/.ssh/botaovava_deploy -F /dev/null -o StrictHostKeyChecking=no -o IdentitiesOnly=yes"
     git_env["GIT_AUTHOR_NAME"] = "botaovava"
     git_env["GIT_AUTHOR_EMAIL"] = "botaovava@cup.local"
 
