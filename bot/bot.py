@@ -199,7 +199,7 @@ class RegistrationModal(ui.Modal, title="Vava Bot4Bots Cup — Registration"):
             "discord_username": str(interaction.user),
             "discord_display": interaction.user.display_name,
             "riot_id": riot_id,
-            "rank": "Unranked",
+            "rank": None,
             "roles": [],
             "registered_at": datetime.datetime.now().isoformat(),
         })
@@ -308,15 +308,23 @@ def organize_teams(num_teams=None):
     if not players:
         return None
 
+    ranked = [p for p in players if p.get("rank") and p["rank"] in RANK_VALUES]
+    skipped = len(players) - len(ranked)
+    if skipped:
+        log.warning("organize_teams: %d player(s) skipped — no rank set", skipped)
+
+    if not ranked:
+        return None
+
     if num_teams is None:
-        num_teams = max(4, len(players) // 5)
+        num_teams = max(4, len(ranked) // 5)
         # Round down to nearest power of 2 for clean bracket
         pow2 = 4
         while pow2 * 2 <= num_teams:
             pow2 *= 2
         num_teams = max(4, pow2)
 
-    sorted_players = sorted(players, key=lambda p: RANK_VALUES.get(p.get("rank", ""), 0), reverse=True)
+    sorted_players = sorted(ranked, key=lambda p: RANK_VALUES.get(p.get("rank", ""), 0), reverse=True)
     players_per_team = max(1, len(sorted_players) // num_teams)
 
     names = TEAM_NAMES[:num_teams]
@@ -752,9 +760,13 @@ async def cup_players(interaction: discord.Interaction):
         return
 
     rank_counts = {}
+    incomplete = 0
     for p in players:
-        r = p.get("rank", "Unranked")
-        rank_counts[r] = rank_counts.get(r, 0) + 1
+        r = p.get("rank")
+        if r and r in RANK_VALUES:
+            rank_counts[r] = rank_counts.get(r, 0) + 1
+        else:
+            incomplete += 1
 
     max_count = max(rank_counts.values()) if rank_counts else 1
     rank_bars = []
@@ -768,14 +780,18 @@ async def cup_players(interaction: discord.Interaction):
     player_list = []
     for p in sorted(players, key=lambda x: x.get("discord_display", "").lower()):
         roles = ", ".join(p.get("roles", [])) or "—"
-        player_list.append(f"• **{p['discord_display']}** — {p.get('rank', '?')} — {p['riot_id']} — [{roles}]")
+        rank_display = p.get("rank") or "⚠️ Not set"
+        player_list.append(f"• **{p['discord_display']}** — {rank_display} — {p['riot_id']} — [{roles}]")
 
-    await interaction.response.send_message(
+    header = (
         f"👥 **Registered Players: {count}**\n"
-        f"Enough for **{count // 5}** full team(s)\n\n"
-        f"**Rank Distribution:**\n" + "\n".join(rank_bars),
-        ephemeral=True,
+        f"Enough for **{count // 5}** full team(s)\n"
     )
+    if incomplete:
+        header += f"⚠️ {incomplete} player(s) haven't set a rank yet.\n"
+    header += f"\n**Rank Distribution:**\n" + "\n".join(rank_bars) if rank_bars else "\n*No ranks set yet*"
+
+    await interaction.response.send_message(header, ephemeral=True)
 
     chunks = [player_list[i:i+25] for i in range(0, len(player_list), 25)]
     for chunk in chunks:
@@ -816,11 +832,13 @@ async def cup_close_registration(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
     players = load_json(PLAYERS_FILE, [])
-    if len(players) < 20:  # At least 4 teams of 5
-        await interaction.followup.send(
-            f"Only {len(players)} players registered. Need at least 20 for 4 teams. Keep registration open.",
-            ephemeral=True,
-        )
+    ranked = [p for p in players if p.get("rank") and p["rank"] in RANK_VALUES]
+    skipped = len(players) - len(ranked)
+    if len(ranked) < 20:
+        msg = f"Only {len(ranked)} ranked players registered (need 20 for 4 teams)."
+        if skipped:
+            msg += f"\n⚠️ {skipped} player(s) haven't set a rank and were excluded."
+        await interaction.followup.send(msg, ephemeral=True)
         return
 
     result = organize_teams()  # Auto-calculates team count
