@@ -1368,36 +1368,45 @@ async def cup_edit(interaction: discord.Interaction, request: str):
         )
         return
 
+    log.info("CUP_EDIT accepted by classifier, running opencode...")
+
     env = os.environ.copy()
     env["PATH"] = os.path.expanduser("~/.opencode/bin") + ":" + env.get("PATH", "")
 
-    # Auto git: pull before, push after
     git_env = os.environ.copy()
     git_env["GIT_SSH_COMMAND"] = "ssh -i ~/.ssh/botaovava_deploy -F /dev/null -o StrictHostKeyChecking=no -o IdentitiesOnly=yes"
     git_env["GIT_AUTHOR_NAME"] = "botaovava"
     git_env["GIT_AUTHOR_EMAIL"] = "botaovava@cup.local"
 
+    # Reset any local changes before pulling
     try:
-        subprocess.run(["git", "pull", "origin", "main"], capture_output=True,
-                       cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
+        await asyncio.create_subprocess_exec(
+            "git", "stash",
+            cwd=str(PROJECT_ROOT), env=git_env,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    except Exception:
+        pass
+    try:
+        pull_proc = await asyncio.create_subprocess_exec(
+            "git", "pull", "origin", "main",
+            cwd=str(PROJECT_ROOT), env=git_env,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await pull_proc.communicate()
     except Exception:
         pass
 
     try:
-        result = subprocess.run(
-            ["opencode", "run", request],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=str(PROJECT_ROOT),
-            env=env,
-        )
-        output = result.stdout.strip() or result.stderr.strip()
+        proc = await asyncio.create_subprocess_exec(
+            "opencode", "run", request,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            cwd=str(PROJECT_ROOT), env=env)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        output = (stdout or stderr or b"").decode().strip()
 
         if len(output) > 1900:
             output = output[:1900] + "\n...(truncated)"
 
-        log.info("CUP_EDIT opencode completed (rc=%d, output=%d chars)", result.returncode, len(output))
+        log.info("CUP_EDIT opencode completed (rc=%d, output=%d chars)", proc.returncode, len(output))
 
         await interaction.followup.send(
             f"**opencode says:**\n```\n{output}\n```" if output else "opencode ran but produced no output.",
@@ -1415,19 +1424,30 @@ async def cup_edit(interaction: discord.Interaction, request: str):
 
         # Auto-commit and push
         try:
-            subprocess.run(["git", "add", "-A"], capture_output=True,
-                           cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
-            commit_result = subprocess.run(
-                ["git", "commit", "-m", f"cup_edit: {request[:80]}"],
-                capture_output=True, cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
-            log.info("CUP_EDIT git commit: %s", commit_result.stdout.decode().strip() or commit_result.stderr.decode().strip())
-            push_result = subprocess.run(["git", "push", "origin", "main"], capture_output=True,
-                           cwd=str(PROJECT_ROOT), env=git_env, timeout=30)
-            log.info("CUP_EDIT git push: rc=%d", push_result.returncode)
-        except Exception:
-            pass
+            add_proc = await asyncio.create_subprocess_exec(
+                "git", "add", "-A",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                cwd=str(PROJECT_ROOT), env=git_env)
+            await add_proc.communicate()
 
-    except subprocess.TimeoutExpired:
+            commit_proc = await asyncio.create_subprocess_exec(
+                "git", "commit", "-m", f"cup_edit: {request[:80]}",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                cwd=str(PROJECT_ROOT), env=git_env)
+            commit_out, commit_err = await commit_proc.communicate()
+            log.info("CUP_EDIT git commit: %s",
+                     (commit_out or commit_err).decode().strip())
+
+            push_proc = await asyncio.create_subprocess_exec(
+                "git", "push", "origin", "main",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                cwd=str(PROJECT_ROOT), env=git_env)
+            await push_proc.communicate()
+            log.info("CUP_EDIT git push: rc=%d", push_proc.returncode)
+        except Exception as e:
+            log.warning("CUP_EDIT git failed: %s", e)
+
+    except asyncio.TimeoutError:
         log.error("CUP_EDIT opencode timed out (120s)")
         await interaction.followup.send("opencode timed out (120s). The task might be too large.", ephemeral=False)
     except FileNotFoundError:
