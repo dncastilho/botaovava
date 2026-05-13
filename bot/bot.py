@@ -97,6 +97,17 @@ def init_deepseek():
         log.info("Bot owner set: %s", BOT_OWNER_ID)
 
 
+def ensure_opencode_auth():
+    """Ensure opencode is configured with the DeepSeek API key from env."""
+    auth_dir = os.path.expanduser("~/.local/share/opencode")
+    auth_file = os.path.join(auth_dir, "auth.json")
+    os.makedirs(auth_dir, exist_ok=True)
+    auth_config = {"deepseek": {"type": "api", "key": DEEPSEEK_API_KEY}}
+    with open(auth_file, "w") as f:
+        json.dump(auth_config, f)
+    log.info("opencode auth configured")
+
+
 def owner_only():
     """Decorator check: only the bot owner can use this command."""
     async def predicate(interaction: discord.Interaction) -> bool:
@@ -1368,7 +1379,9 @@ async def cup_edit(interaction: discord.Interaction, request: str):
         )
         return
 
-    log.info("CUP_EDIT accepted by classifier, running opencode...")
+    log.info("CUP_EDIT accepted by classifier, running via opencode...")
+
+    ensure_opencode_auth()
 
     env = os.environ.copy()
     env["PATH"] = os.path.expanduser("~/.opencode/bin") + ":" + env.get("PATH", "")
@@ -1377,84 +1390,75 @@ async def cup_edit(interaction: discord.Interaction, request: str):
     git_env["GIT_AUTHOR_NAME"] = "botaovava"
     git_env["GIT_AUTHOR_EMAIL"] = "botaovava@cup.local"
 
-    # Reset any local changes before pulling
     try:
-        await asyncio.create_subprocess_exec(
-            "git", "stash",
-            cwd=str(PROJECT_ROOT), env=git_env,
+        stash = await asyncio.create_subprocess_exec(
+            "git", "stash", cwd=str(PROJECT_ROOT), env=git_env,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-    except Exception:
-        pass
-    try:
-        pull_proc = await asyncio.create_subprocess_exec(
-            "git", "pull", "origin", "main",
-            cwd=str(PROJECT_ROOT), env=git_env,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        await pull_proc.communicate()
+        await stash.communicate()
+        pull = await asyncio.create_subprocess_exec(
+            "git", "pull", "origin", "main", cwd=str(PROJECT_ROOT), env=git_env,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await pull.communicate()
     except Exception:
         pass
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            "opencode", "run", request,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            cwd=str(PROJECT_ROOT), env=env)
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
-        output = (stdout or stderr or b"").decode().strip()
-
-        if len(output) > 1900:
-            output = output[:1900] + "\n...(truncated)"
-
-        log.info("CUP_EDIT opencode completed (rc=%d, output=%d chars)", proc.returncode, len(output))
-
-        await interaction.followup.send(
-            f"**opencode says:**\n```\n{output}\n```" if output else "opencode ran but produced no output.",
-            ephemeral=False,
+            "opencode", "run",
+            "--dir", str(PROJECT_ROOT),
+            "--dangerously-skip-permissions",
+            request,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
-
-        # Reload modules if code changed
-        try:
-            from importlib import reload as _reload
-            for mod_name in list(sys.modules.keys()):
-                if mod_name.startswith("scripts."):
-                    _reload(sys.modules[mod_name])
-        except Exception:
-            pass
-
-        # Auto-commit and push
-        try:
-            add_proc = await asyncio.create_subprocess_exec(
-                "git", "add", "-A",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                cwd=str(PROJECT_ROOT), env=git_env)
-            await add_proc.communicate()
-
-            commit_proc = await asyncio.create_subprocess_exec(
-                "git", "commit", "-m", f"cup_edit: {request[:80]}",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                cwd=str(PROJECT_ROOT), env=git_env)
-            commit_out, commit_err = await commit_proc.communicate()
-            log.info("CUP_EDIT git commit: %s",
-                     (commit_out or commit_err).decode().strip())
-
-            push_proc = await asyncio.create_subprocess_exec(
-                "git", "push", "origin", "main",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                cwd=str(PROJECT_ROOT), env=git_env)
-            await push_proc.communicate()
-            log.info("CUP_EDIT git push: rc=%d", push_proc.returncode)
-        except Exception as e:
-            log.warning("CUP_EDIT git failed: %s", e)
-
-    except asyncio.TimeoutError:
-        log.error("CUP_EDIT opencode timed out (120s)")
-        await interaction.followup.send("opencode timed out (120s). The task might be too large.", ephemeral=False)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        opencode_ok = proc.returncode == 0
+        if not opencode_ok:
+            log.error("CUP_EDIT opencode failed (exit %d): %.500s", proc.returncode, stderr.decode())
     except FileNotFoundError:
-        log.error("CUP_EDIT opencode binary not found")
-        await interaction.followup.send("opencode not found at ~/.opencode/bin/opencode.", ephemeral=False)
-    except Exception as e:
-        log.error("CUP_EDIT opencode error: %s", e)
-        await interaction.followup.send(f"Error running opencode: {e}", ephemeral=False)
+        log.error("CUP_EDIT opencode not found on PATH")
+        await interaction.followup.send("opencode is not installed on this server.", ephemeral=False)
+        return
+    except asyncio.TimeoutError:
+        log.error("CUP_EDIT opencode timed out after 5 minutes")
+        await interaction.followup.send("opencode timed out after 5 minutes. Check logs.", ephemeral=False)
+        return
+    except Exception:
+        log.exception("CUP_EDIT opencode failed")
+        await interaction.followup.send("opencode encountered an unexpected error.", ephemeral=False)
+        return
+
+    try:
+        from importlib import reload as _reload
+        for mod_name in list(sys.modules.keys()):
+            if mod_name.startswith("scripts."):
+                _reload(sys.modules[mod_name])
+    except Exception:
+        pass
+
+    log.info("CUP_EDIT opencode completed (exit %d)", proc.returncode)
+
+    last_commit = ""
+    try:
+        log_proc = await asyncio.create_subprocess_exec(
+            "git", "log", "-1", "--format=%s", cwd=str(PROJECT_ROOT),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        log_out, _ = await log_proc.communicate()
+        last_commit = log_out.decode().strip()
+    except Exception:
+        pass
+
+    if opencode_ok:
+        await interaction.followup.send(
+            f"**opencode completed:** {last_commit or 'changes applied'}\n"
+            f"Full output in bot logs.",
+            ephemeral=False)
+    else:
+        await interaction.followup.send(
+            f"**opencode failed** (exit code {proc.returncode})\n"
+            f"```{stderr.decode()[:1000]}```",
+            ephemeral=False)
 
 
 @tree.command(name="cup_help", description="Show all commands")
