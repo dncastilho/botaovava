@@ -97,15 +97,7 @@ def init_deepseek():
         log.info("Bot owner set: %s", BOT_OWNER_ID)
 
 
-def ensure_opencode_auth():
-    """Ensure opencode is configured with the DeepSeek API key from env."""
-    auth_dir = os.path.expanduser("~/.local/share/opencode")
-    auth_file = os.path.join(auth_dir, "auth.json")
-    os.makedirs(auth_dir, exist_ok=True)
-    auth_config = {"deepseek": {"type": "api", "key": DEEPSEEK_API_KEY}}
-    with open(auth_file, "w") as f:
-        json.dump(auth_config, f)
-    log.info("opencode auth configured")
+
 
 
 def owner_only():
@@ -764,7 +756,14 @@ async def cup_players(interaction: discord.Interaction):
         r = p.get("rank", "Unranked")
         rank_counts[r] = rank_counts.get(r, 0) + 1
 
-    rank_list = "\n".join(f"• {r}: {c}" for r, c in sorted(rank_counts.items()))
+    max_count = max(rank_counts.values()) if rank_counts else 1
+    rank_bars = []
+    for rank in RANKS:
+        count = rank_counts.get(rank, 0)
+        if count > 0:
+            bar_len = max(1, int(count / max_count * 15))
+            bar = "█" * bar_len
+            rank_bars.append(f"`{rank:<14}` {bar} {count}")
 
     player_list = []
     for p in sorted(players, key=lambda x: x.get("discord_display", "").lower()):
@@ -773,15 +772,14 @@ async def cup_players(interaction: discord.Interaction):
 
     await interaction.response.send_message(
         f"👥 **Registered Players: {count}**\n"
-        f"Enough for **{count // 5}** full team(s)\n",
+        f"Enough for **{count // 5}** full team(s)\n\n"
+        f"**Rank Distribution:**\n" + "\n".join(rank_bars),
         ephemeral=True,
     )
 
     chunks = [player_list[i:i+25] for i in range(0, len(player_list), 25)]
     for chunk in chunks:
         await interaction.followup.send("\n".join(chunk), ephemeral=True)
-
-    await interaction.followup.send(f"**Ranks:**\n{rank_list[:1000]}", ephemeral=True)
 
 
 @tree.command(name="cup_rules", description="View tournament rules")
@@ -1350,116 +1348,6 @@ async def cup_reset(interaction: discord.Interaction):
     )
 
 
-@tree.command(name="cup_edit", description="(Owner) Ask the bot to modify its own code via opencode")
-@owner_only()
-@app_commands.describe(request="What should the bot change about itself?")
-async def cup_edit(interaction: discord.Interaction, request: str):
-    if not DEEPSEEK_ENABLED:
-        await interaction.response.send_message("DeepSeek API key is required for this feature.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=False)
-
-    log.info("CUP_EDIT request from %s: %s", interaction.user.display_name, request[:200])
-
-    classify = await deepseek_generate(
-        f'You are a classifier. A Discord bot admin sent this message: "{request}"\n'
-        f'Does this message ask the bot to modify its own source code or project files? '
-        f'Answer ONLY "YES" or "NO". Code changes include: adding features, fixing bugs, '
-        f'changing logic, updating the bot, editing files in its project directory.',
-        max_tokens=5,
-    )
-
-    if not classify or "NO" in classify.upper():
-        log.info("CUP_EDIT rejected by classifier: %s", classify)
-        await interaction.followup.send(
-            f"Not a code-change request. Use other commands for tournament operations.\n\n"
-            f"If this should be a code change, be specific about what file or behavior to modify.",
-            ephemeral=False,
-        )
-        return
-
-    log.info("CUP_EDIT accepted by classifier, running via opencode...")
-
-    ensure_opencode_auth()
-
-    env = os.environ.copy()
-    env["PATH"] = os.path.expanduser("~/.opencode/bin") + ":" + env.get("PATH", "")
-
-    git_env = os.environ.copy()
-    git_env["GIT_AUTHOR_NAME"] = "botaovava"
-    git_env["GIT_AUTHOR_EMAIL"] = "botaovava@cup.local"
-
-    try:
-        stash = await asyncio.create_subprocess_exec(
-            "git", "stash", cwd=str(PROJECT_ROOT), env=git_env,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        await stash.communicate()
-        pull = await asyncio.create_subprocess_exec(
-            "git", "pull", "origin", "main", cwd=str(PROJECT_ROOT), env=git_env,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        await pull.communicate()
-    except Exception:
-        pass
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "opencode", "run",
-            "--dir", str(PROJECT_ROOT),
-            "--dangerously-skip-permissions",
-            request,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
-        opencode_ok = proc.returncode == 0
-        if not opencode_ok:
-            log.error("CUP_EDIT opencode failed (exit %d): %.500s", proc.returncode, stderr.decode())
-    except FileNotFoundError:
-        log.error("CUP_EDIT opencode not found on PATH")
-        await interaction.followup.send("opencode is not installed on this server.", ephemeral=False)
-        return
-    except asyncio.TimeoutError:
-        log.error("CUP_EDIT opencode timed out after 5 minutes")
-        await interaction.followup.send("opencode timed out after 5 minutes. Check logs.", ephemeral=False)
-        return
-    except Exception:
-        log.exception("CUP_EDIT opencode failed")
-        await interaction.followup.send("opencode encountered an unexpected error.", ephemeral=False)
-        return
-
-    try:
-        from importlib import reload as _reload
-        for mod_name in list(sys.modules.keys()):
-            if mod_name.startswith("scripts."):
-                _reload(sys.modules[mod_name])
-    except Exception:
-        pass
-
-    log.info("CUP_EDIT opencode completed (exit %d)", proc.returncode)
-
-    last_commit = ""
-    try:
-        log_proc = await asyncio.create_subprocess_exec(
-            "git", "log", "-1", "--format=%s", cwd=str(PROJECT_ROOT),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-        log_out, _ = await log_proc.communicate()
-        last_commit = log_out.decode().strip()
-    except Exception:
-        pass
-
-    if opencode_ok:
-        await interaction.followup.send(
-            f"**opencode completed:** {last_commit or 'changes applied'}\n"
-            f"Full output in bot logs.",
-            ephemeral=False)
-    else:
-        await interaction.followup.send(
-            f"**opencode failed** (exit code {proc.returncode})\n"
-            f"```{stderr.decode()[:1000]}```",
-            ephemeral=False)
-
 
 @tree.command(name="cup_help", description="Show all commands")
 async def cup_help(interaction: discord.Interaction):
@@ -1487,7 +1375,6 @@ async def cup_help(interaction: discord.Interaction):
         "`/cup_start_bracket` — Generate bracket\n"
         "`/cup_announce` — Announce matches to channel\n"
         "`/cup_phase` — View/advance phase\n"
-        "`/cup_edit` — Modify bot code via opencode\n"
         "`/cup_reset` — Wipe everything, fresh start",
         inline=False,
     )
